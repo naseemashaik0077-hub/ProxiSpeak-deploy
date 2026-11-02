@@ -1,5 +1,10 @@
 const { randomUUID } = require("node:crypto");
 const { emitToRoom, getRoomChannel } = require("./roomUtils");
+const { deliverChatMessage } = require("./lib/chat");
+const { roomChannel } = require("./lib/rooms");
+
+// The world scope shares one history bucket, keyed by this instead of a room id.
+const WORLD_CHAT_SCOPE = "world";
 
 const MAX_CHAT_MESSAGE_LENGTH = 500;
 const CHAT_HISTORY_LIMIT = 100;
@@ -50,7 +55,8 @@ async function loadRecentChatHistory(db, roomId) {
 
 async function sendRoomChatHistory(socket, db, players, roomId) {
   const player = players.get(socket.id);
-  if (!player || player.roomId !== roomId) return;
+  // World history is readable from any room; a room history is not.
+  if (!player || (roomId !== WORLD_CHAT_SCOPE && player.roomId !== roomId)) return;
 
   try {
     const messages = await loadRecentChatHistory(db, roomId);
@@ -76,7 +82,11 @@ function registerChatHandlers(socket, {
   onMessageSending,
   canSendMessage,
 }) {
-  socket.on("chat:send", async (messageText, clientMessageId, callback) => {
+  socket.on("chat:send", async (messageText, clientMessageId, scopeOrCallback, maybeCallback) => {
+    // Backwards compatible: the third argument used to be the callback.
+    const scope = typeof scopeOrCallback === "string" ? scopeOrCallback : "room";
+    const callback =
+      typeof scopeOrCallback === "function" ? scopeOrCallback : maybeCallback;
     const respond = (result) => {
       if (typeof callback === "function") callback(result);
     };
@@ -113,7 +123,7 @@ function registerChatHandlers(socket, {
       senderId: socket.id,
       name: sender.name,
       avatarColor: sender.avatarColor || DEFAULT_AVATAR_COLOR,
-      roomId: sender.roomId,
+      roomId: scope === WORLD_CHAT_SCOPE ? WORLD_CHAT_SCOPE : sender.roomId,
       text: validation.text,
       timestamp,
       clientMessageId: clientMessageId.trim(),
@@ -124,12 +134,27 @@ function registerChatHandlers(socket, {
     try {
       await db.collection("chatMessages").insertOne(messageDocument);
       const message = toPublicChatMessage(messageDocument);
-      emitToRoom(io, sender.roomId, "chat:message", message);
-      io.except(getRoomChannel(sender.roomId)).emit("chat:message", {
-        id: message.id,
-        senderId: message.senderId,
-        roomId: message.roomId,
+      const delivered = deliverChatMessage({
+        scope,
+        message,
+        room: sender.room,
+        emitWorld: (payload) => io.emit("chat:message", payload),
+        emitRoom: (roomName, payload) => {
+          const channel = roomChannel(roomName);
+          if (!channel) return false;
+          io.to(channel).emit("chat:message", payload);
+          return true;
+        },
       });
+
+      if (delivered && scope !== WORLD_CHAT_SCOPE) {
+        // The other rooms get a ping without the text, so unread counts still work.
+        io.except(getRoomChannel(sender.roomId)).emit("chat:message", {
+          id: message.id,
+          senderId: message.senderId,
+          roomId: message.roomId,
+        });
+      }
       respond({ success: true, id: message.id });
     } catch (error) {
       if (error.code === 11000) {

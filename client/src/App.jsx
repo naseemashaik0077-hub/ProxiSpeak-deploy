@@ -266,6 +266,7 @@ export default function App() {
 
   const [showLanding, setShowLanding] = useState(true);
   const [activeView, setActiveView] = useState("office");
+  const [chatScope, setChatScope] = useState("room");
   const [activity, setActivity] = useState([]);
   const [micDeviceId, setMicDeviceId] = useState("");
   const [speakerDeviceId, setSpeakerDeviceId] = useState("");
@@ -524,7 +525,8 @@ export default function App() {
         typeof message.id !== "string" ||
         typeof message.text !== "string" ||
         typeof message.timestamp !== "string" ||
-        message.roomId !== activeRoomIdRef.current
+        (message.roomId !== activeRoomIdRef.current &&
+          message.roomId !== "world")
       ) {
         return;
       }
@@ -905,6 +907,7 @@ export default function App() {
       "chat:send",
       text,
       clientMessageId,
+      chatScope,
       (timeoutError, response) => {
         setSendingChat(false);
         if (timeoutError || !response?.success) {
@@ -1024,6 +1027,13 @@ export default function App() {
   }, []);
 
   const activeRoom = rooms.find((room) => room.id === activeRoomId);
+
+  // The chat panel shows one scope at a time; both live in the same log.
+  const visibleChatMessages = messages.filter((message) =>
+    chatScope === "world"
+      ? message.roomId === "world"
+      : message.roomId === activeRoomId
+  );
 
   if (showLanding) {
     return <Landing onEnter={() => setShowLanding(false)} />;
@@ -1574,16 +1584,39 @@ export default function App() {
       )}
 
       <section className="chat-panel" data-panel="chat">
-        <h2>{activeRoom?.name || "Room"} chat</h2>
+        <div className="chat-tabs" role="tablist" aria-label="Chat scope">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={chatScope === "room"}
+            className={chatScope === "room" ? "chat-tab is-active" : "chat-tab"}
+            onClick={() => setChatScope("room")}
+          >
+            {activeRoom?.name || "Room"}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={chatScope === "world"}
+            className={chatScope === "world" ? "chat-tab is-active" : "chat-tab"}
+            onClick={() => setChatScope("world")}
+          >
+            Global
+          </button>
+        </div>
         <ul className="chat-log" ref={chatLogRef}>
           {chatHistoryLoading ? (
             <li className="chat-empty">Loading chat history…</li>
           ) : chatHistoryError ? (
             <li className="chat-empty" role="alert">{chatHistoryError}</li>
-          ) : messages.length === 0 ? (
-            <li className="chat-empty">No messages yet.</li>
+          ) : visibleChatMessages.length === 0 ? (
+            <li className="chat-empty">
+              {chatScope === "world"
+                ? "No global messages yet."
+                : "No messages in this room yet."}
+            </li>
           ) : (
-            messages.map((message) => (
+            visibleChatMessages.map((message) => (
               <li key={message.id} className="chat-message">
                 <span
                   className="chat-avatar"

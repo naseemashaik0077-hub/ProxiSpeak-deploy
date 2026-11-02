@@ -26,4 +26,20 @@ function createChatMessage(player, text, id) {
   };
 }
 
-module.exports = { createChatMessage, MAX_CHAT_MESSAGE_LENGTH };
+// Routing a message is a decision, not plumbing, so it lives here where it can be
+// tested: world messages go to everyone, room messages only to that room.
+function deliverChatMessage({ scope, message, room, emitWorld, emitRoom }) {
+  if (scope === "world") {
+    emitWorld(message);
+    return true;
+  }
+
+  if (scope !== "room" || !room) return false;
+  return emitRoom(room, message) !== false;
+}
+
+module.exports = {
+  createChatMessage,
+  deliverChatMessage,
+  MAX_CHAT_MESSAGE_LENGTH,
+};

@@ -1358,3 +1358,33 @@ button:disabled {
   font-size: 11px;
   color: #64748b;
 }
+
+/* Chat scope tabs */
+.chat-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.chat-tab {
+  padding: 6px 14px;
+  border: 1px solid #263449;
+  border-radius: 999px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.chat-tab:hover {
+  color: #e2e8f0;
+  border-color: #38bdf8;
+}
+
+.chat-tab.is-active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+  font-weight: 600;
+}

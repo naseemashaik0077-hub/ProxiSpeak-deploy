@@ -7,6 +7,7 @@ import { addActivity } from "./activity";
 import Landing from "./Landing";
 import { DEFAULT_LAYOUT, furnitureOf, zonesOf, plantsOf } from "./office";
 import useRoomLayout from "./useRoomLayout";
+import { drawMinimap, MINIMAP_WIDTH, MINIMAP_HEIGHT } from "./minimap";
 import {
   clearUnreadCount,
   incrementUnreadCount,
@@ -258,6 +259,7 @@ export default function App() {
   const keysRef = useRef({});
   const gameFocusedRef = useRef(false);
   const playersRef = useRef(new Map());
+  const minimapRef = useRef(null);
   const nearbyRef = useRef(new Set());
   const activeRoomIdRef = useRef("");
   const pendingChatRef = useRef(null);
@@ -649,6 +651,7 @@ export default function App() {
     const canvas = canvasRef.current;
     const canvasWrap = canvasWrapRef.current;
     const ctx = canvas?.getContext("2d");
+    const minimapContext = minimapRef.current?.getContext("2d");
     if (!canvas || !canvasWrap || !ctx) return undefined;
 
     let animationId;
@@ -749,9 +752,14 @@ export default function App() {
         const isMe = player.id === client?.id;
         if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) continue;
 
+        // One distance per player, shared by the ring and the pixel label.
+        const isNearby = !isMe && nearbyRef.current.has(player.id) && Boolean(me);
+        const distance = isNearby
+          ? Math.round(Math.hypot(player.x - me.x, player.y - me.y))
+          : null;
+
         // Graded proximity ring: green close, blue medium, red far.
-        if (!isMe && nearbyRef.current.has(player.id) && me) {
-          const distance = Math.hypot(player.x - me.x, player.y - me.y);
+        if (isNearby) {
           const ringColor =
             distance < 40 ? "#34d399" : distance < 75 ? "#38bdf8" : "#f87171";
           ctx.beginPath();
@@ -807,6 +815,38 @@ export default function App() {
 
         ctx.fillStyle = "#e2e8f0";
         ctx.fillText(label, player.x, player.y + 40);
+
+        // How far away, in world pixels — the number the brief's radius refers to.
+        if (distance !== null) {
+          const pxLabel = `${distance} px`;
+          ctx.font = "11px Arial";
+          const pxWidth = ctx.measureText(pxLabel).width;
+          ctx.fillStyle = "rgba(56, 189, 248, 0.16)";
+          ctx.beginPath();
+          roundRect(
+            ctx,
+            player.x - pxWidth / 2 - 5,
+            player.y + 45,
+            pxWidth + 10,
+            15,
+            4
+          );
+          ctx.fill();
+          ctx.fillStyle = "#7dd3fc";
+          ctx.fillText(pxLabel, player.x, player.y + 56);
+        }
+      }
+
+      if (minimapContext) {
+        drawMinimap(minimapContext, {
+          zones: zonesOf(layoutRef.current),
+          players: playersRef.current.values(),
+          selfId: client?.id,
+          worldWidth: WORLD_WIDTH,
+          worldHeight: WORLD_HEIGHT,
+          width: MINIMAP_WIDTH,
+          height: MINIMAP_HEIGHT,
+        });
       }
 
       animationId = requestAnimationFrame(draw);
@@ -1227,6 +1267,13 @@ export default function App() {
             width={WORLD_WIDTH}
             height={WORLD_HEIGHT}
             className="world-canvas"
+          />
+          <canvas
+            ref={minimapRef}
+            width={MINIMAP_WIDTH}
+            height={MINIMAP_HEIGHT}
+            className="minimap"
+            aria-label="Office minimap showing where everyone is"
           />
         </div>
         <div className="world-footer">

@@ -2,8 +2,8 @@ const assert = require("node:assert/strict");
 const {
   TYPING_IDLE_TIMEOUT_MS,
   registerChatTypingHandlers,
-} = require("./chatTyping");
-const { registerChatHandlers } = require("./chat");
+} = require("../chatTyping");
+const { registerChatHandlers } = require("../chat");
 
 function createSocket(id) {
   const handlers = new Map();

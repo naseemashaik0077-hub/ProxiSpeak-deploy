@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { registerRoomHandler } = require("./roomHandler");
+const { registerRoomHandler } = require("../roomHandler");
 const {
   DEFAULT_ROOM_ID,
   getRoomChannel,
@@ -9,8 +9,8 @@ const {
   emitToRoom,
   emitRoomPresence,
   emitPlayerLeft,
-} = require("./roomUtils");
-const { getNearbyPlayers } = require("./proximity");
+} = require("../roomUtils");
+const { getNearbyPlayers } = require("../lib/proximity");
 
 const rooms = [
   { id: "open-world", name: "Open World" },

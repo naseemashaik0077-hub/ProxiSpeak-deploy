@@ -88,35 +88,43 @@ Port Vivek's volume + resume-audio prompt onto `main`, then run the full bug swe
 
 ---
 
-## Current state (27 Oct)
+## Final state (3 Nov)
 
-**Mid-review: 4/4 complete** — proximity, WebRTC integration, the spatial audit
-(`RESULT: PASS`, ~1 ms) and the Audio Check (two browsers, audio verified by meter
-and by ear).
+Everything this plan listed is built and merged, except video and the deploy.
 
-**Built since this plan was written** — most of what the sections above list as
-"deferred" now exists:
+**The brief's four weeks**
 
-- **Rooms / spaces** — real room scoping (`player:joinRoom`); proximity, chat and
-  WebRTC are all scoped per space, plus a Meeting Room call that works regardless of
-  distance with live participant updates.
-- **Chat** — room-scoped, rate-limited.
-- **Office map** — five labelled zones with furniture, graded proximity rings,
-  initials avatars.
-- **People list & profile** — presence, avatar colour, status line.
-- **Screen sharing** — Meeting Room only, ported from Vivek's branch.
-- **Occlusion** — furniture between two players muffles the voice (gain + low-pass).
-  This is the brief's Week-4 "sound-blocking obstacles".
-- **Resilience & deploy** — global error handling, graceful shutdown, rate limiting,
+- **Week 1** — signaling, keyboard movement, the MongoDB geospatial schema.
+- **Week 2** — `$near` proximity gating at 100 px with hysteresis, WebRTC audio.
+- **Week 3** — distance attenuation and stereo panning in the spatial mixer; the
+  Redis mesh adapter with an eight-peer cap, failing soft without Redis.
+- **Week 4** — room layouts persisted in MongoDB; sound occlusion from the same
+  furniture, with a gain cut and a low-pass.
+
+**Beyond the brief**
+
+- **Rooms / spaces** — proximity, chat and WebRTC scoped per room, plus a Meeting
+  Room call that works regardless of distance.
+- **Chat** — room and global scopes with typing indicators and unread counts.
+- **Screen sharing** — Meeting Room only.
+- **Activity feed** — joins, leaves and people coming into earshot.
+- **Office map** — five labelled zones, furniture, graded proximity rings.
+- **People list, profile, device pickers** — microphone and speaker selection.
+- **Resilience & deploy** — error handling, graceful shutdown, rate limiting,
   configurable CORS, optional TURN, `.env.example`, Dockerfile, a Deploying section.
 
 **Still open**
 
-- **Landing page** — the last mockup panel not built.
-- **Video** (camera, not screen sharing) — deferred.
-- **Redis mesh** — single instance today; the adapter is not wired.
-- **Room persistence** — the furniture layout lives in the client; moving it into
-  MongoDB would let layouts be saved and shared.
+- **The mesh has not run on two instances.** The adapter, the cap and the fallback
+  are tested; proving it needs Redis and two processes.
+- **The occlusion has not been heard.** The geometry has 14 tests; the effect needs
+  two browsers and a desk.
+- **Video** (camera, not screen sharing) — never in the brief.
 - **Deploy** — needs HTTPS, TURN credentials and a host.
+- **No authentication** — fine for an internal demo, not for public deployment.
 
-**Tests:** 10 server suites plus the client occlusion suite, all passing.
+**Tests:** 15 server suites, 19 client unit tests, plus the client smoke and
+occlusion suites — all passing. The spatial benchmark passes at 200/200 correct,
+max 2.60 ms against a 20 ms budget.
+
+See `docs/FINAL-REVIEW.md` for the full account, including what is and is not proven.

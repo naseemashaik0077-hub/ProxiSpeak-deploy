@@ -260,6 +260,8 @@ export default function App() {
   const gameFocusedRef = useRef(false);
   const playersRef = useRef(new Map());
   const minimapRef = useRef(null);
+  const listeningRadiusRef = useRef(100);
+  const radiusTimerRef = useRef(null);
   const nearbyRef = useRef(new Set());
   const activeRoomIdRef = useRef("");
   const pendingChatRef = useRef(null);
@@ -761,8 +763,16 @@ export default function App() {
 
         // Graded proximity ring: green close, blue medium, red far.
         if (isNearby) {
+          // Bands scale with the listener's radius, so a ring never says "out of
+          // range" about someone you can hear. At the default 100px these are 40
+          // and 75, exactly as before.
+          const radius = listeningRadiusRef.current;
           const ringColor =
-            distance < 40 ? "#34d399" : distance < 75 ? "#38bdf8" : "#f87171";
+            distance < radius * 0.4
+              ? "#34d399"
+              : distance < radius * 0.75
+                ? "#38bdf8"
+                : "#f87171";
           ctx.beginPath();
           ctx.arc(player.x, player.y, 34, 0, Math.PI * 2);
           ctx.strokeStyle = ringColor;
@@ -967,11 +977,17 @@ export default function App() {
 
   // The radius is a session preference on the server, so a reconnect would reset it
   // to the default. Re-apply the listener's choice once the new player exists.
-  const listeningRadiusRef = useRef(100);
-
   useEffect(() => {
     listeningRadiusRef.current = listeningRadius;
   }, [listeningRadius]);
+
+  // Drop a pending radius emit if the component goes away mid-drag.
+  useEffect(
+    () => () => {
+      if (radiusTimerRef.current) clearTimeout(radiusTimerRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     if (!connected) return;
@@ -985,15 +1001,25 @@ export default function App() {
   // out of step with the earshot actually in force.
   const handleSetRadius = (next) => {
     setListeningRadius(next);
+    // Keep the ring bands in step with the thumb while it moves.
+    listeningRadiusRef.current = next;
 
     const client = socketRef.current;
     if (!client?.connected) return;
 
-    client.emit("player:setRadius", next, (response) => {
-      if (response?.success && Number.isFinite(response.radius)) {
-        setListeningRadius(response.radius);
-      }
-    });
+    // A range input fires on every pixel of a drag, and each emit costs a database
+    // query and a proximity resync. Only the value the user settles on is sent.
+    if (radiusTimerRef.current) clearTimeout(radiusTimerRef.current);
+    radiusTimerRef.current = setTimeout(() => {
+      radiusTimerRef.current = null;
+      const current = socketRef.current;
+      if (!current?.connected) return;
+      current.emit("player:setRadius", next, (response) => {
+        if (response?.success && Number.isFinite(response.radius)) {
+          setListeningRadius(response.radius);
+        }
+      });
+    }, 150);
   };
 
   const handleJoinRoom = (nextRoomId) => {
@@ -1354,7 +1380,9 @@ export default function App() {
       </section>
 
       <section className="nearby-panel" data-panel="office">
-        <strong>Nearby players (within 100px): {nearbyPlayers.length}</strong>
+        <strong>
+          Nearby players (within {listeningRadius}px): {nearbyPlayers.length}
+        </strong>
         {nearbyPlayers.length === 0 ? (
           <p>No one nearby yet — move closer to another avatar.</p>
         ) : (
@@ -1402,8 +1430,8 @@ export default function App() {
           <span>{speakerVolume}%</span>
         </label>
         <p>
-          Enable your microphone and move within 100 pixels of another player
-          to connect.
+          Enable your microphone and move within {listeningRadius} pixels of
+          another player to connect.
         </p>
         {voiceEnabled && (
           <div className="mic-meter">

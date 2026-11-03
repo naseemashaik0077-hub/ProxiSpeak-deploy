@@ -87,6 +87,25 @@ async function main() {
   const text = container.textContent || "";
   check("the world toolbar renders", /2D proximity space/i.test(text));
   check("the people panel renders", /people online/i.test(text));
+  check(
+    "the minimap canvas renders alongside the world",
+    Boolean(container.querySelector(".minimap"))
+  );
+  check(
+    "the listening radius control renders",
+    Boolean(container.querySelector("#listening-radius"))
+  );
+  check(
+    "the radius control is a bounded range input",
+    (() => {
+      const input = container.querySelector("#listening-radius");
+      return Boolean(
+        input &&
+          input.getAttribute("min") === "50" &&
+          input.getAttribute("max") === "200"
+      );
+    })()
+  );
 
   await act(async () => {
     root.unmount();

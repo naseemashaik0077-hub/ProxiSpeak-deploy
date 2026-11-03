@@ -30,7 +30,7 @@ code work; both are demonstrations.
 | Week | Requirement | Status | Evidence |
 |---|---|---|---|
 | 1 | Signaling, movement, MongoDB geospatial schema | ✅ | `world:state`, `player:move`, 2dsphere index |
-| 2 | Proximity (`$near`, 100px) + WebRTC audio | ✅ | 7 proximity tests; peer reached `connected`; audio heard |
+| 2 | Proximity (`$near`, 100px) + WebRTC audio | ✅ | 7 proximity tests; radius adjustable 50–200; peer reached `connected`; audio heard |
 | 3 | Mesh scaling (Redis) + dynamic attenuation | 🟡 | Attenuation ✅ in the mixer; mesh **built, not yet run on two instances** |
 | 4 | Room persistence + sound-blocking obstacles + polish | 🟡 | Layouts ✅ in MongoDB; obstacles ✅ built, **not yet heard**; stereo pan ✅; 60 FPS unmeasured |
 
@@ -40,9 +40,11 @@ code work; both are demonstrations.
 state on connect, keyboard movement at 240 px/s, a 1000×600 world with furniture
 collision, and a MongoDB `2dsphere` index on player positions.
 
-**Week 2 — proximity and audio.** A `$near` query gated at 100 px with
-**hysteresis** (connect at 100, disconnect at 115) so hovering at the edge does not
-tear down and rebuild the peer connection. WebRTC audio with offer/answer
+**Week 2 — proximity and audio.** A `$near` query gated at a listening radius,
+defaulting to 100 px and adjustable per listener between 50 and 200, with
+**hysteresis** (connect at the radius, disconnect at 1.15× it — so 100 and 115 at
+the default) so hovering at the edge does not tear down and rebuild the peer
+connection. WebRTC audio with offer/answer
 signaling, ICE buffering, and a spatial mixer built on the Web Audio API.
 
 **Week 3 — attenuation and mesh.** Distance attenuation and stereo panning run in
@@ -67,7 +69,7 @@ low-pass when something is in the way.
 | Two browsers hear each other | Peer reached state `connected`; audio confirmed by ear and by the live level meters |
 | Proximity gating works | Live server log: `Nearby players for rev : 1` on approach |
 | Reconnect restores state | Log: `Player name: revanth` → `MongoDB matched: 1` |
-| Nothing regressed | **13 server suites + 4 client suites**, all passing |
+| Nothing regressed | **16 server suites + 27 client unit tests**, plus smoke and occlusion, all passing |
 | Client↔server contracts | Static contract test compares every client destructure against the server's payload |
 
 The audit judges the **20 ms budget on database execution time**, not the network
@@ -168,7 +170,7 @@ not.
 The engineering is finished and defensible: proximity gating with hysteresis,
 a spatial mixer, sound occlusion that no competing product does, room-scoped
 presence and chat, persisted room layouts, an optional multi-instance mesh, and
-seventeen test suites that run in seconds.
+twenty test suites that run in seconds.
 
 What is missing is **evidence for two claims**, not code. Those two demos are a
 couple of hours of work, and they convert "we built it" into "we showed it". Do

@@ -58,6 +58,12 @@ const {
   isWithinProximity,
   nearestPeers,
 } = require("./lib/session");
+const {
+  clampListeningRadius,
+  leaveRadiusFor,
+  MIN_LISTENING_RADIUS,
+  MAX_LISTENING_RADIUS,
+} = require("./lib/proximity");
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -127,9 +133,8 @@ const activeShares = new Map();
 
 const WORLD_WIDTH = 1000;
 const WORLD_HEIGHT = 600;
-const PROXIMITY_RADIUS = 100;
-// Hysteresis: connect at 100px, but only disconnect past 115px.
-const PROXIMITY_LEAVE_RADIUS = 115;
+// Listening radius and its hysteresis gap live in lib/proximity.js, because each
+// listener now has their own.
 // Cap on how many peers one client connects to — the mesh must stay bounded.
 const MAX_MESH_PEERS = 8;
 const DEFAULT_AVATAR_COLOR = "#6ee7b7";
@@ -222,6 +227,10 @@ async function syncProximity(socketId, player) {
   // Peers already in range get the wider leave radius (hysteresis).
   const oldNearby = proximityState.get(socketId) || new Set();
 
+  // Each listener has their own earshot; the query must cover the widest case.
+  const listeningRadius = clampListeningRadius(player.listeningRadius);
+  const leaveRadius = leaveRadiusFor(listeningRadius);
+
   const nearbyPlayers = await db
     .collection("players")
     .find({
@@ -230,7 +239,7 @@ async function syncProximity(socketId, player) {
       roomId: player.roomId,
       location: {
         $near: [player.x, player.y],
-        $maxDistance: PROXIMITY_LEAVE_RADIUS,
+        $maxDistance: leaveRadius,
       },
     })
     .project({ _id: 0, socketId: 1, name: 1, avatarColor: 1, x: 1, y: 1 })
@@ -259,8 +268,8 @@ async function syncProximity(socketId, player) {
       isWithinProximity({
         distance: candidate.distance,
         isAlreadyNearby: oldNearby.has(candidate.id),
-        enterRadius: PROXIMITY_RADIUS,
-        leaveRadius: PROXIMITY_LEAVE_RADIUS,
+        enterRadius: listeningRadius,
+        leaveRadius,
       })
     );
 
@@ -490,6 +499,38 @@ io.on("connection", (socket) => {
   });
 
   // Save the player's name.
+  // A listener can widen or narrow their earshot within limits. Re-syncing straight
+  // away means the change takes effect now rather than on the next step.
+  socket.on("player:setRadius", async (value, callback) => {
+    const respond = (result) => {
+      if (typeof callback === "function") callback(result);
+    };
+
+    const currentPlayer = players.get(socket.id);
+    if (!currentPlayer) {
+      respond({ success: false, error: "Player not found." });
+      return;
+    }
+
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(numeric)) {
+      respond({ success: false, error: "Radius must be a number." });
+      return;
+    }
+
+    const radius = clampListeningRadius(numeric);
+    currentPlayer.listeningRadius = radius;
+    players.set(socket.id, currentPlayer);
+
+    try {
+      await syncProximity(socket.id, currentPlayer);
+    } catch (error) {
+      console.error("Failed to resync proximity after a radius change:", error.message);
+    }
+
+    respond({ success: true, radius });
+  });
+
   socket.on("player:setName", async (name, callback) => {
     const normalizedName = normalizeDisplayName(name);
 

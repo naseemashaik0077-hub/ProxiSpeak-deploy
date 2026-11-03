@@ -1402,3 +1402,50 @@ button:disabled {
   box-shadow: 0 6px 18px rgba(2, 6, 12, 0.55);
   pointer-events: none;
 }
+
+/* Listening radius control */
+.radius-control {
+  margin: 16px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #263449;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.45);
+}
+
+.radius-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.radius-head label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.radius-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+
+.radius-control input[type="range"] {
+  width: 100%;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.radius-control input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.radius-help {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #64748b;
+}

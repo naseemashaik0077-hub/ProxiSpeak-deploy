@@ -269,6 +269,7 @@ export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [activeView, setActiveView] = useState("office");
   const [chatScope, setChatScope] = useState("room");
+  const [listeningRadius, setListeningRadius] = useState(100);
   const [activity, setActivity] = useState([]);
   const [micDeviceId, setMicDeviceId] = useState("");
   const [speakerDeviceId, setSpeakerDeviceId] = useState("");
@@ -964,6 +965,37 @@ export default function App() {
     );
   };
 
+  // The radius is a session preference on the server, so a reconnect would reset it
+  // to the default. Re-apply the listener's choice once the new player exists.
+  const listeningRadiusRef = useRef(100);
+
+  useEffect(() => {
+    listeningRadiusRef.current = listeningRadius;
+  }, [listeningRadius]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const client = socketRef.current;
+    if (client && listeningRadiusRef.current !== 100) {
+      client.emit("player:setRadius", listeningRadiusRef.current);
+    }
+  }, [connected]);
+
+  // The server clamps and echoes the accepted value, so the slider can never drift
+  // out of step with the earshot actually in force.
+  const handleSetRadius = (next) => {
+    setListeningRadius(next);
+
+    const client = socketRef.current;
+    if (!client?.connected) return;
+
+    client.emit("player:setRadius", next, (response) => {
+      if (response?.success && Number.isFinite(response.radius)) {
+        setListeningRadius(response.radius);
+      }
+    });
+  };
+
   const handleJoinRoom = (nextRoomId) => {
     const client = socketRef.current;
     if (!client?.connected || switchingRoom || nextRoomId === activeRoomId) {
@@ -1196,6 +1228,29 @@ export default function App() {
             </span>
           </div>
         </div>
+
+        <div className="radius-control">
+          <div className="radius-head">
+            <label htmlFor="listening-radius">Listening radius</label>
+            <span className="radius-value">{listeningRadius} px</span>
+          </div>
+          <input
+            id="listening-radius"
+            type="range"
+            min="50"
+            max="200"
+            step="10"
+            value={listeningRadius}
+            disabled={!connected}
+            onChange={(event) => handleSetRadius(Number(event.target.value))}
+            aria-describedby="radius-help"
+          />
+          <p className="radius-help" id="radius-help">
+            How far you can hear. The gap between connecting and disconnecting
+            scales with it, so voices do not cut in and out at the edge.
+          </p>
+        </div>
+
         <form className="player-name-form" onSubmit={handleSetName}>
           <label htmlFor="player-name">
             {savedName ? `You are "${savedName}"` : "Set your display name"}

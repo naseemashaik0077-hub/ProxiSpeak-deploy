@@ -27,7 +27,9 @@ function walk(dir, pattern, out = []) {
 const serverFiles = walk(path.join(ROOT, "server"), /\.js$/).filter(
   (file) => !file.includes(`${path.sep}tests${path.sep}`) && !file.includes(".test.")
 );
-const clientFiles = walk(path.join(ROOT, "client", "src"), /\.(jsx?|mjs)$/);
+const clientFiles = walk(path.join(ROOT, "client", "src"), /\.(jsx?|mjs)$/).filter(
+  (file) => !file.includes(".test.")
+);
 
 const serverSource = serverFiles.map((f) => fs.readFileSync(f, "utf8")).join("\n");
 const clientSource = clientFiles.map((f) => fs.readFileSync(f, "utf8")).join("\n");
@@ -108,6 +110,38 @@ for (const [event, wanted] of handled) {
 }
 
 check(`compared ${compared} client/server event payloads`, compared > 0);
+
+// An event the client emits that the server never handles is a button that does
+// nothing and reports nothing. Cheap to check, and it is a whole family of silent
+// failures — the screen:list bug was one of these.
+const clientEmits = new Set();
+for (const match of clientSource.matchAll(/\.emit\("([a-z:]+)"/g)) {
+  clientEmits.add(match[1]);
+}
+
+const serverHandlers = new Set();
+for (const match of serverSource.matchAll(/\.on\("([a-z:]+)"/g)) {
+  serverHandlers.add(match[1]);
+}
+
+// Socket.IO's own lifecycle events are emitted by the client library, not by us.
+const LIFECYCLE = new Set(["connect", "disconnect", "connect_error", "reconnect"]);
+
+const orphans = [...clientEmits].filter(
+  (event) => !LIFECYCLE.has(event) && !serverHandlers.has(event)
+);
+
+check(
+  `every client emit has a server handler${
+    orphans.length ? ` — missing: ${orphans.join(", ")}` : ""
+  }`,
+  orphans.length === 0
+);
+
+check(
+  `found ${clientEmits.size} client emits and ${serverHandlers.size} server handlers`,
+  clientEmits.size > 0 && serverHandlers.size > 0
+);
 
 console.log(
   failures === 0

@@ -69,7 +69,7 @@ low-pass when something is in the way.
 | Two browsers hear each other | Peer reached state `connected`; audio confirmed by ear and by the live level meters |
 | Proximity gating works | Live server log: `Nearby players for rev : 1` on approach |
 | Reconnect restores state | Log: `Player name: revanth` → `MongoDB matched: 1` |
-| Nothing regressed | **16 server suites + 27 client unit tests**, plus smoke and occlusion, all passing |
+| Nothing regressed | **17 server suites + 27 client unit tests**, plus smoke and occlusion, all passing |
 | Client↔server contracts | Static contract test compares every client destructure against the server's payload |
 
 The audit judges the **20 ms budget on database execution time**, not the network
@@ -170,7 +170,7 @@ not.
 The engineering is finished and defensible: proximity gating with hysteresis,
 a spatial mixer, sound occlusion that no competing product does, room-scoped
 presence and chat, persisted room layouts, an optional multi-instance mesh, and
-twenty test suites that run in seconds.
+twenty-one test suites that run in seconds.
 
 What is missing is **evidence for two claims**, not code. Those two demos are a
 couple of hours of work, and they convert "we built it" into "we showed it". Do

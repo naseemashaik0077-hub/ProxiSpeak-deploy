@@ -358,6 +358,12 @@ export default function App() {
       setConnected(false);
       setConnectedPlayerCount(0);
       setTypingUsers({});
+      setMeetingParticipants([]);
+      setMeetingHandRaised(false);
+      setRaisedHands({});
+      setMeetingReactions([]);
+      for (const timer of reactionTimersRef.current.values()) clearTimeout(timer);
+      reactionTimersRef.current.clear();
       playersRef.current.clear();
       nearbyRef.current.clear();
       setPlayers([]);
@@ -624,6 +630,11 @@ export default function App() {
     });
     client.on("meeting:hand", (payload) => {
       if (!payload || typeof payload.id !== "string") return;
+      // The server lowers your hand for you when you leave the call or the room.
+      // Without this the toggle keeps claiming a hand is up that nobody can see.
+      if (payload.id === socketRef.current?.id) {
+        setMeetingHandRaised(Boolean(payload.raised));
+      }
       setRaisedHands((current) => {
         const next = { ...current };
         if (payload.raised) next[payload.id] = payload.name || "Someone";
@@ -1097,6 +1108,14 @@ export default function App() {
     );
   };
 
+  const clearMeetingLocalState = () => {
+    for (const timer of reactionTimersRef.current.values()) clearTimeout(timer);
+    reactionTimersRef.current.clear();
+    setMeetingReactions([]);
+    setRaisedHands({});
+    setMeetingHandRaised(false);
+  };
+
   const toggleMeetingHand = () => {
     const client = socketRef.current;
     const raised = !meetingHandRaised;
@@ -1134,6 +1153,10 @@ export default function App() {
   const handleMeetingLeave = () => {
     const client = socketRef.current;
     if (!client?.connected) return;
+
+    // Meeting state must not outlive the call: a stale raised hand or a leftover
+    // reaction makes the next join look like it inherited someone else's session.
+    clearMeetingLocalState();
     client.emit("meeting:leave", () => setMeetingParticipants([]));
   };
 

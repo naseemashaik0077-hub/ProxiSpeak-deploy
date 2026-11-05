@@ -143,6 +143,40 @@ check(
   clientEmits.size > 0 && serverHandlers.size > 0
 );
 
+// The meeting reaction set exists on both sides. The server rejects anything
+// outside its list, so a client button for an emoji the server does not know is a
+// dead button that reports nothing at all.
+function parseEmojiList(source, pattern) {
+  const match = source.match(pattern);
+  if (!match) return null;
+  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+const serverReactions = parseEmojiList(
+  serverSource,
+  /MEETING_REACTIONS = Object\.freeze\(\[([^\]]*)\]\)/
+);
+const clientReactions = parseEmojiList(
+  clientSource,
+  /MEETING_REACTIONS = \[([^\]]*)\]/
+);
+
+check("the server declares its reaction set", Boolean(serverReactions));
+check("the client declares its reaction set", Boolean(clientReactions));
+
+check(
+  `client and server reaction sets match${
+    serverReactions && clientReactions &&
+    serverReactions.join("") !== clientReactions.join("")
+      ? ` — server [${serverReactions.join(" ")}] vs client [${clientReactions.join(" ")}]`
+      : ""
+  }`,
+  Boolean(serverReactions) &&
+    Boolean(clientReactions) &&
+    serverReactions.length > 0 &&
+    serverReactions.join("|") === clientReactions.join("|")
+);
+
 console.log(
   failures === 0
     ? "All contract tests passed"

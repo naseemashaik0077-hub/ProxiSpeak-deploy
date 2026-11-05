@@ -19,6 +19,8 @@ import {
 } from "./typingIndicators";
 import "./App.css";
 
+const MEETING_REACTIONS = ["👍", "👏", "😂", "❤️", "🙌"];
+
 const WORLD_WIDTH = 1000;
 const WORLD_HEIGHT = 600;
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
@@ -306,6 +308,10 @@ export default function App() {
   const [roomsError, setRoomsError] = useState("");
   const [roomError, setRoomError] = useState("");
   const [meetingParticipants, setMeetingParticipants] = useState([]);
+  const [meetingHandRaised, setMeetingHandRaised] = useState(false);
+  const [raisedHands, setRaisedHands] = useState({});
+  const [meetingReactions, setMeetingReactions] = useState([]);
+  const reactionTimersRef = useRef(new Map());
   const {
     voiceEnabled,
     voiceStatus,
@@ -615,6 +621,38 @@ export default function App() {
       setMeetingParticipants((current) =>
         current.filter((p) => p.id !== participantId)
       );
+    });
+    client.on("meeting:hand", (payload) => {
+      if (!payload || typeof payload.id !== "string") return;
+      setRaisedHands((current) => {
+        const next = { ...current };
+        if (payload.raised) next[payload.id] = payload.name || "Someone";
+        else delete next[payload.id];
+        return next;
+      });
+    });
+    client.on("meeting:reaction", (payload) => {
+      if (
+        !payload ||
+        typeof payload.id !== "string" ||
+        typeof payload.emoji !== "string"
+      ) {
+        return;
+      }
+      const entry = {
+        key: `${payload.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: payload.name || "Someone",
+        emoji: payload.emoji,
+      };
+      setMeetingReactions((current) => [...current, entry].slice(-6));
+      // Reactions are a moment, not a record — let them fade on their own.
+      const timer = setTimeout(() => {
+        reactionTimersRef.current.delete(entry.key);
+        setMeetingReactions((current) =>
+          current.filter((reaction) => reaction.key !== entry.key)
+        );
+      }, 4000);
+      reactionTimersRef.current.set(entry.key, timer);
     });
     client.on("player:status", ({ id, status: nextStatus } = {}) => {
       if (typeof id !== "string") return;
@@ -1057,6 +1095,26 @@ export default function App() {
         setMeetingParticipants([]);
       }
     );
+  };
+
+  const toggleMeetingHand = () => {
+    const client = socketRef.current;
+    const raised = !meetingHandRaised;
+    setMeetingHandRaised(raised);
+    if (!client?.connected) return;
+
+    client.emit("meeting:hand", { raised }, (response) => {
+      if (response?.success) return;
+      // The server refused, so the button must not claim otherwise.
+      setMeetingHandRaised(!raised);
+      setRoomError(response?.error || "Could not update your hand status.");
+    });
+  };
+
+  const sendMeetingReaction = (emoji) => {
+    const client = socketRef.current;
+    if (!client?.connected) return;
+    client.emit("meeting:reaction", { emoji });
   };
 
   const handleMeetingJoin = () => {
@@ -1658,9 +1716,51 @@ export default function App() {
             </button>
           </div>
         )}
+        {activeRoomId === "meeting-room" && meetingParticipants.length > 0 && (
+          <div className="meeting-events">
+            <button
+              type="button"
+              className={`room-button${meetingHandRaised ? " is-active" : ""}`}
+              onClick={toggleMeetingHand}
+              aria-pressed={meetingHandRaised}
+            >
+              {meetingHandRaised ? "Lower hand ✋" : "Raise hand ✋"}
+            </button>
+            <div
+              className="meeting-reactions"
+              role="group"
+              aria-label="Send a reaction"
+            >
+              {MEETING_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="reaction-button"
+                  onClick={() => sendMeetingReaction(emoji)}
+                  aria-label={`React with ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            {meetingReactions.length > 0 && (
+              <ul className="reaction-feed" aria-live="polite">
+                {meetingReactions.map((reaction) => (
+                  <li key={reaction.key}>
+                    <span aria-hidden="true">{reaction.emoji}</span>{" "}
+                    {reaction.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {meetingParticipants.length > 0 && (
           <p className="panel-note">
-            On the call: {meetingParticipants.map((p) => p.name).join(", ")}
+            On the call:{" "}
+            {meetingParticipants
+              .map((p) => (raisedHands[p.id] ? `${p.name} ✋` : p.name))
+              .join(", ")}
           </p>
         )}
         {roomError && <p className="panel-error">{roomError}</p>}

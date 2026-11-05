@@ -34,10 +34,12 @@ const {
 } = require("./chat");
 const { registerChatTypingHandlers } = require("./chatTyping");
 const {
+  MEETING_ROOM,
   canJoinMeetingCall,
   getMeetingCallParticipants,
   canRelayWebRtcSignal,
 } = require("./lib/meeting-call");
+const { registerMeetingEvents } = require("./lib/meeting-events");
 const { createRateLimiter } = require("./lib/rate-limit");
 const {
   registerScreenShareHandlers,
@@ -128,6 +130,9 @@ const lastNearbyCount = new Map();
 // Players currently in the Meeting Room call (talk regardless of distance).
 const meetingCallParticipants = new Set();
 
+// Participants in that call who have their hand raised.
+const meetingCallRaisedHands = new Set();
+
 // Active screen shares, keyed by the sharer's socket id.
 const activeShares = new Map();
 
@@ -199,6 +204,17 @@ function roomIdForName(roomName) {
     availableRooms.find((room) => room.name === roomName)?.id ||
     DEFAULT_ROOM_ID
   );
+}
+
+// Lower a hand and tell the room. Without this, someone who leaves the call or
+// changes space leaves a raised hand showing against their name.
+function lowerMeetingHand(io, socketId, room) {
+  if (!meetingCallRaisedHands.delete(socketId)) return;
+
+  const channel = roomChannel(room || MEETING_ROOM);
+  if (channel) {
+    io.to(channel).emit("meeting:hand", { id: socketId, raised: false });
+  }
 }
 
 // Relay a WebRTC signal to a peer, but only when the two are in the same space
@@ -373,6 +389,7 @@ io.on("connection", (socket) => {
       clearChatTyping();
       const wasInMeetingCall = meetingCallParticipants.has(socketId);
       meetingCallParticipants.delete(socketId);
+      lowerMeetingHand(io, socketId, roomNameForId(previousRoomId));
       const previousRoomName = roomNameForId(previousRoomId);
       if (previousRoomName === "Meeting Room") {
         stopActiveScreenShare(socketId, activeShares, io, "room-left");
@@ -791,6 +808,7 @@ io.on("connection", (socket) => {
   socket.on("meeting:leave", (callback) => {
     const currentPlayer = players.get(socket.id);
     meetingCallParticipants.delete(socket.id);
+    lowerMeetingHand(io, socket.id, currentPlayer?.room);
 
     if (currentPlayer) {
       const channel = roomChannel(currentPlayer.room);
@@ -842,12 +860,19 @@ io.on("connection", (socket) => {
 
   // Screen sharing — Meeting Room only, with its own signaling handlers.
   registerScreenShareHandlers(socket, { players, io, activeShares });
+  registerMeetingEvents(socket, {
+    io,
+    players,
+    participantIds: meetingCallParticipants,
+    raisedHands: meetingCallRaisedHands,
+  });
 
   // Mark the player disconnected.
   socket.on("disconnect", () => {
     const disconnectedPlayer = players.get(socket.id);
     const wasInMeetingCall = meetingCallParticipants.has(socket.id);
     meetingCallParticipants.delete(socket.id);
+    lowerMeetingHand(io, socket.id, disconnectedPlayer?.room);
     players.delete(socket.id);
     spawnSlots.delete(socket.id);
     moveLimiter.forget(socket.id);

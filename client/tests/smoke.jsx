@@ -67,6 +67,35 @@ async function main() {
   const cta = findByText(container, /enter the office/i);
   check("the landing has an Enter action", Boolean(cta));
 
+  check(
+    "the landing has a navigation header",
+    Boolean(container.querySelector(".landing-nav"))
+  );
+  check(
+    "the landing shows the proximity radar",
+    Boolean(container.querySelector(".landing-radar"))
+  );
+  check(
+    "the landing has three feature cards",
+    container.querySelectorAll(".landing-features article").length === 3
+  );
+  check(
+    "how-it-works lists three steps",
+    container.querySelectorAll(".landing-steps li").length === 3
+  );
+  check(
+    "the landing explains what happens to your voice",
+    Boolean(container.querySelector(".landing-privacy"))
+  );
+  check(
+    "the landing ends with a second call to action",
+    container.querySelectorAll(".landing-final .landing-cta").length === 1
+  );
+  check(
+    "the page claims nothing about pricing or login",
+    !/pricing|log ?in/i.test(container.textContent || "")
+  );
+
   // --- entering the office ---------------------------------------------
   await act(async () => {
     cta.click();
@@ -87,6 +116,31 @@ async function main() {
   const text = container.textContent || "";
   check("the world toolbar renders", /2D proximity space/i.test(text));
   check("the people panel renders", /people online/i.test(text));
+  check(
+    "the world is clickable for movement",
+    /click to walk/i.test(
+      container.querySelector(".canvas-wrap")?.getAttribute("aria-label") || ""
+    )
+  );
+  check(
+    "clicking the world does not throw",
+    (() => {
+      try {
+        const wrap = container.querySelector(".canvas-wrap");
+        if (!wrap) return false;
+        wrap.dispatchEvent(
+          new window.MouseEvent("click", {
+            bubbles: true,
+            clientX: 40,
+            clientY: 40,
+          })
+        );
+        return true;
+      } catch (error) {
+        return false;
+      }
+    })()
+  );
   check(
     "the minimap canvas renders alongside the world",
     Boolean(container.querySelector(".minimap"))

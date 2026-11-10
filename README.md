@@ -424,4 +424,4 @@ frontend's `VITE_SERVER_URL` at the backend and rebuild.
 |---|---|
 | **Assignment** | ITS/WEB/1322 |
 | **Repository** | [revanthofficial21/ProxiSpeak](https://github.com/revanthofficial21/ProxiSpeak) | 
-| **Documentation** | [Final review](docs/FINAL-REVIEW.md) · [Testing](docs/TESTING.md) · [Roadmap](docs/ROADMAP.md) · [WebRTC research](docs/WebRTC-Research.md) |
+| **Documentation** | [Final review](docs/FINAL-REVIEW.md) · [Testing](docs/TESTING.md) · [WebRTC research](docs/WebRTC-Research.md) |

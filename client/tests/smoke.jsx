@@ -88,6 +88,31 @@ async function main() {
   check("the world toolbar renders", /2D proximity space/i.test(text));
   check("the people panel renders", /people online/i.test(text));
   check(
+    "the world is clickable for movement",
+    /click to walk/i.test(
+      container.querySelector(".canvas-wrap")?.getAttribute("aria-label") || ""
+    )
+  );
+  check(
+    "clicking the world does not throw",
+    (() => {
+      try {
+        const wrap = container.querySelector(".canvas-wrap");
+        if (!wrap) return false;
+        wrap.dispatchEvent(
+          new window.MouseEvent("click", {
+            bubbles: true,
+            clientX: 40,
+            clientY: 40,
+          })
+        );
+        return true;
+      } catch (error) {
+        return false;
+      }
+    })()
+  );
+  check(
     "the minimap canvas renders alongside the world",
     Boolean(container.querySelector(".minimap"))
   );

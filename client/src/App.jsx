@@ -8,6 +8,7 @@ import Landing from "./Landing";
 import { DEFAULT_LAYOUT, furnitureOf, zonesOf, plantsOf } from "./office";
 import useRoomLayout from "./useRoomLayout";
 import { drawMinimap, MINIMAP_WIDTH, MINIMAP_HEIGHT } from "./minimap";
+import { pointerToWorld, clampToWorld, stepToward } from "./cursor";
 import {
   clearUnreadCount,
   incrementUnreadCount,
@@ -25,6 +26,8 @@ const WORLD_WIDTH = 1000;
 const WORLD_HEIGHT = 600;
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
 const SPEED = 240;
+// Close enough to a click target to call it reached.
+const ARRIVE_DISTANCE = 6;
 const AVATAR_RADIUS = 20;
 const DEFAULT_AVATAR_COLOR = "#6ee7b7";
 
@@ -262,6 +265,8 @@ export default function App() {
   const gameFocusedRef = useRef(false);
   const playersRef = useRef(new Map());
   const minimapRef = useRef(null);
+  // Where a click asked the avatar to walk to, in world coordinates.
+  const moveTargetRef = useRef(null);
   const listeningRadiusRef = useRef(100);
   const radiusTimerRef = useRef(null);
   const nearbyRef = useRef(new Set());
@@ -766,9 +771,28 @@ export default function App() {
         if (keys.arrowup || keys.w) dy -= 1;
         if (keys.arrowdown || keys.s) dy += 1;
 
+        // A key press abandons a click destination; otherwise walk toward it.
+        let clickStep = null;
+
         if (dx !== 0 || dy !== 0) {
-          const length = Math.hypot(dx, dy);
-          const distance = SPEED * deltaTime;
+          moveTargetRef.current = null;
+        } else if (moveTargetRef.current) {
+          clickStep = stepToward(current, moveTargetRef.current, SPEED, deltaTime);
+
+          if (!clickStep || clickStep.remaining <= ARRIVE_DISTANCE) {
+            moveTargetRef.current = null;
+            clickStep = null;
+          } else {
+            dx = clickStep.dx;
+            dy = clickStep.dy;
+          }
+        }
+
+        if (dx !== 0 || dy !== 0) {
+          const length = Math.hypot(dx, dy) || 1;
+          // A click step is already capped so it cannot overshoot the destination.
+          const distance = clickStep ? clickStep.travel : SPEED * deltaTime;
+
           const stepX = (dx / length) * distance;
           const stepY = (dy / length) * distance;
           const nextX = Math.max(
@@ -783,11 +807,16 @@ export default function App() {
           // If we somehow start inside furniture, let the player walk out.
           const furniture = furnitureOf(layoutRef.current);
           const stuck = hitsObstacle(current.x, current.y, furniture);
-          if (stuck || !hitsObstacle(nextX, current.y, furniture)) {
-            current.x = nextX;
-          }
-          if (stuck || !hitsObstacle(current.x, nextY, furniture)) {
-            current.y = nextY;
+          const canMoveX = stuck || !hitsObstacle(nextX, current.y, furniture);
+          const canMoveY = stuck || !hitsObstacle(current.x, nextY, furniture);
+
+          if (canMoveX) current.x = nextX;
+          if (canMoveY) current.y = nextY;
+
+          // Blocked on both axes: the destination is behind furniture, so stop
+          // pressing into it instead of vibrating against the edge.
+          if (moveTargetRef.current && !canMoveX && !canMoveY) {
+            moveTargetRef.current = null;
           }
 
           if (timestamp - lastSent > 40) {
@@ -798,6 +827,19 @@ export default function App() {
       }
 
       drawOffice(ctx, layoutRef.current);
+
+      // A dashed marker at the destination, so a click gives immediate feedback
+      // even before the avatar has moved a pixel.
+      if (moveTargetRef.current) {
+        ctx.beginPath();
+        ctx.arc(moveTargetRef.current.x, moveTargetRef.current.y, 10, 0, Math.PI * 2);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+      }
       const me = client ? playersRef.current.get(client.id) : null;
 
       for (const player of playersRef.current.values()) {
@@ -1136,6 +1178,32 @@ export default function App() {
     client.emit("meeting:reaction", { emoji });
   };
 
+  // A click anywhere in the office sets a destination. The canvas is drawn at
+  // world size but displayed scaled, so the click is mapped through its bounding
+  // rect rather than used as an offset.
+  const handleWorldClick = (event) => {
+    canvasWrapRef.current?.focus();
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const point = pointerToWorld(
+      event.clientX,
+      event.clientY,
+      canvas.getBoundingClientRect(),
+      WORLD_WIDTH,
+      WORLD_HEIGHT
+    );
+    if (!point) return;
+
+    moveTargetRef.current = clampToWorld(
+      point,
+      AVATAR_RADIUS,
+      WORLD_WIDTH,
+      WORLD_HEIGHT
+    );
+  };
+
   const handleMeetingJoin = () => {
     const client = socketRef.current;
     if (!client?.connected) return;
@@ -1421,8 +1489,8 @@ export default function App() {
           ref={canvasWrapRef}
           className="canvas-wrap"
           tabIndex={0}
-          aria-label="Game world. Click here, then use WASD or arrow keys to move."
-          onClick={() => canvasWrapRef.current?.focus()}
+          aria-label="Game world. Click to walk there, or use WASD and the arrow keys."
+          onClick={handleWorldClick}
         >
           <canvas
             ref={canvasRef}

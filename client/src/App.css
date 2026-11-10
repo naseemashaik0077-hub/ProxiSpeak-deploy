@@ -206,6 +206,8 @@ input {
   width: 100%;
   overflow: hidden;
   outline: none;
+  /* The office is a click target now, so it should look like one. */
+  cursor: crosshair;
 }
 
 .canvas-wrap:focus-visible {

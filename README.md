@@ -407,7 +407,89 @@ frontend's `VITE_SERVER_URL` at the backend and rebuild.
 
 ---
 
-## 14. Team
+## 14. My contribution
+
+I built the backend and the integration layer — the parts that make the spatial
+model work — and brought the team's work onto `main`.
+
+**Core architecture**
+
+- Designed the three-layer split: server owns truth, browser owns rendering and
+  audio, WebRTC carries the voice peer to peer
+- Built the Socket.IO signalling server: presence, rooms, throttled position
+  broadcast, and signal relaying restricted to peers actually in range
+- Chose the database to do the proximity work — a `$near` query on a `2d` index
+  answers "who is within earshot" in one call instead of filtering every player
+
+**Proximity**
+
+- `$near` proximity with a listening radius, defaulting to 100 px
+- **Hysteresis** at 1.15× the radius, so standing on the boundary does not open and
+  close the peer connection repeatedly — audible as a stutter
+- Made the radius **adjustable per listener, 50–200 px**, with the hysteresis gap
+  scaling alongside it and the ring colours following, so a ring never says "out of
+  range" about someone you can hear
+- Capped each client at its **eight nearest peers** — a full mesh does not scale
+
+**Audio**
+
+- WebRTC integration: peer connection per nearby player, offer/answer, ICE
+  buffering, mute and unmute
+- The **spatial mixer** — one node chain per peer, distance gain and stereo panning
+  updated in a single animation-frame loop
+- **Sound occlusion**: furniture between two avatars drops gain to 35 % and closes a
+  low-pass to 800 Hz, using a Liang–Barsky segment-versus-rectangle test. This is
+  the feature that distinguishes the project from ordinary proximity chat
+- Microphone and speaker device pickers, live level meters, resume-audio prompt
+
+**Rooms and persistence**
+
+- Room scoping for proximity, audio and chat, with a Meeting Room call that ignores
+  distance
+- **Room layouts persisted in MongoDB** with an API, strict validation on every
+  read, and startup repair for layouts seeded under older furniture names
+- Chat routing split into room and global scopes with typing indicators and unread
+  counts
+
+**Client**
+
+- The canvas world: zones, furniture by kind, proximity rings, name plates
+- The application shell — sidebar navigation, top bar, view switching
+- **Click to walk**, with the pointer-to-world mapping extracted and tested
+- Minimap, pixel distance labels, adjustable radius control
+- The **landing page**, rebuilt to the brief's structure with copy that claims
+  nothing the product cannot do
+
+**Platform**
+
+- Optional **Redis mesh** for multi-instance deployments, attaching only when
+  `REDIS_URL` is set and failing soft without it
+- Rate limiting, configurable CORS, graceful shutdown, global error handling
+- Pooled MongoDB connection with a guard against concurrent connects
+- Dockerfile, environment examples and a Render deployment guide
+
+**Testing**
+
+- 21 server suites, 40 client unit tests, 20 smoke checks, 14 occlusion checks
+- Built the **static contract test** that compares server payloads against client
+  reads and asserts every emitted event has a handler — after that class of bug
+  shipped twice
+- Built the **smoke harness** that renders the real component tree in jsdom, after
+  two client bugs passed every static check
+- Extracted decisions into pure functions — proximity gating, chat routing, layout
+  normalisation, radius clamping, meeting-event validation — so they can be tested
+  directly
+
+**Integration**
+
+Ported teammates' work onto `main` rather than merging stale branches: Vivek's
+screen sharing and chat indicators, Naseema's activity notifications, meeting
+events and chat routing, and Janakirani's connection and dev-server improvements.
+Each was reworked against the current architecture and covered by tests.
+
+---
+
+## 15. Team
 
 | Member | Role | Contribution |
 |---|---|---|
@@ -418,7 +500,7 @@ frontend's `VITE_SERVER_URL` at the backend and rebuild.
 
 ---
 
-## 15. Project information
+## 16. Project information
 
 | | |
 |---|---|

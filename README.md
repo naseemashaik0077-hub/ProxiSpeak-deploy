@@ -1,261 +1,374 @@
 # ProxiSpeak — Geospatial Proximity Audio Ecosystem
 
-A real-time virtual collaboration space where you move an avatar around a 2D
-office and hear the people near you — spatially, organically, the way you would
-in a real room.
+A real-time virtual office you walk through in the browser. You hear the people near
+you and nothing else — audio fades with distance, pans with direction, and muffles
+when furniture sits between two avatars.
 
-**Stack:** React + Vite · HTML5 Canvas · WebRTC · Web Audio API · Node.js +
-Express · Socket.IO · MongoDB (geospatial)
+**React · Vite · HTML5 Canvas · Web Audio API · WebRTC · Node.js · Express ·
+Socket.IO · MongoDB (geospatial) · optional Redis**
+
+![Landing page](docs/images/landing.png)
 
 ---
 
 ## 1. Overview
 
-Remote collaboration tools like Zoom force everyone into a rigid "room" where
-one person speaks at a time. They lose the spontaneous, spatial dynamics of a
-real office — where you can hear a conversation happening nearby and simply walk
-over to join it.
+An always-on call is the wrong model for a team: everyone hears everyone, so nobody
+talks. ProxiSpeak restores what a real office has — you hear the people at your
+desk, not the people two rooms away, and moving closer is how a conversation
+starts.
 
-ProxiSpeak rebuilds that dynamic in the browser. Users log into a shared 2D
-overhead map of a virtual office, move their avatars around, and — as they get
-closer to someone — a WebRTC audio connection is established automatically. The
-Node.js backend continuously calculates the distance between avatars using
-MongoDB geospatial queries and orchestrates the peer-to-peer audio mesh, aiming
-to keep the experience seamless for 50+ concurrent users in one space.
+You move an avatar around a shared 2D office. Everyone within your listening radius
+is connected to you by a peer-to-peer audio stream. Walk away and the connection
+closes. Furniture in the way muffles the voice. Rooms scope who you can hear and
+who you can talk to.
 
-## 2. Key Modules
+---
 
-| Module | Responsibility |
+## 2. Screenshots
+
+| Landing | Office |
 |---|---|
-| **Geospatial Engine** (MongoDB) | Tracks every avatar's X/Y in real time and groups users by physical proximity (`$near` / `$geoWithin`). |
-| **Signaling Server** (Node.js + Socket.IO) | Orchestrates WebRTC peer handshakes, forwarding offers/answers/ICE **only** between users within earshot. |
-| **Spatial Audio Mixer** (Web Audio API) | Adjusts gain (volume) and stereo panning of each peer's audio by relative distance. *(in progress — Week 3/4)* |
-| **2D Virtual World** (React + Canvas) | High-performance rendering of the office map and live avatar movement. |
+| ![Landing](docs/images/landing.png) | ![Office](docs/images/office.png) |
 
-## 3. Architecture
+![Features and how it works](docs/images/features.png)
+
+---
+
+## 3. What's built
+
+**Movement and presence**
+
+- Canvas world, 1000 × 600, with labelled zones and furniture
+- Keyboard movement (WASD / arrow keys) at 240 px/s with furniture collision
+- **Click to walk** — click anywhere and the avatar walks there, sliding along
+  furniture and giving up when a destination is unreachable
+- Non-overlapping spawn slots, so avatars never stack on arrival
+- Live online count and a people list with speaking indicators
+
+**Proximity**
+
+- MongoDB `$near` on a `2d` geospatial index — one query per move, not a loop
+- Listening radius of 100 px by default, **adjustable 50–200 px** per listener
+- **Hysteresis**: connect at the radius, disconnect at 1.15× it, so standing on the
+  boundary does not tear down and rebuild the connection
+- `proximity:enter` / `proximity:leave` to both sides, plus a `player:nearby` list
+- Distance in world pixels shown beside each nearby player
+- Capped at the **eight nearest peers** — a full mesh does not scale
+
+**Audio**
+
+- WebRTC peer connections with offer/answer and ICE buffering
+- Distance attenuation and stereo panning in one mixer loop
+- **Sound occlusion**: furniture between two players drops gain to 35 % and closes
+  a low-pass to 800 Hz, tested with Liang–Barsky segment-versus-rectangle
+- Microphone mute/unmute, live level meters, microphone and speaker pickers
+- Optional TURN relay for peers behind symmetric NATs
+
+**Rooms and conversation**
+
+- Three spaces (Open World, Meeting Room, Lounge) scoping proximity, audio and chat
+- **Meeting Room call** that works regardless of distance, with a participant list
+- **Raise hand** and **emoji reactions** inside the call
+- Chat with **room and global scopes**, typing indicators and unread counts
+- Chat history persisted in MongoDB
+- **Screen sharing** into the Meeting Room
+- Activity feed for joins, leaves and people coming into earshot
+
+**Platform**
+
+- Room layouts persisted in MongoDB, served by `GET /api/rooms/:id/layout`
+- Strict validation on every layout read; startup repairs layouts seeded under
+  older furniture names
+- Optional Redis adapter for multi-instance deployments, failing soft without it
+- Rate limiting, configurable CORS, graceful shutdown, global error handling
+- Pooled MongoDB connection with a guard against concurrent connects
+- Minimap, ring legend, app shell with sidebar navigation
+- Dockerfile, environment examples and a Render deployment guide
+
+---
+
+## 4. Architecture
+
+```mermaid
+flowchart LR
+  subgraph B1["Browser A"]
+    ui[React UI<br/>Canvas + Web Audio]
+    rtc1[RTCPeerConnection]
+  end
+
+  subgraph B2["Browser B"]
+    rtc2[RTCPeerConnection]
+  end
+
+  subgraph S["Node server"]
+    express[Express<br/>REST: rooms, layouts]
+    sio[Socket.IO<br/>presence, proximity,<br/>chat, signalling]
+    mix[Proximity + session<br/>logic]
+  end
+
+  mongo[(MongoDB<br/>players, rooms,<br/>chat, layouts)]
+  redis[(Redis<br/>optional mesh)]
+
+  ui -- "player:move, chat:send,<br/>webrtc:*" --> sio
+  sio -- "$near, persists" --> mongo
+  sio --- mix
+  mix --> mongo
+  express --> mongo
+  sio -. "multi-instance only" .- redis
+  rtc1 <-. "audio — DTLS-SRTP,<br/>never through the server" .-> rtc2
+  sio -- "proximity:enter/leave,<br/>player:nearby" --> ui
+```
+
+**Three layers, each doing one job.** The server owns truth — who is connected,
+where they are, which room they are in, who can hear whom. The browser owns
+rendering and audio. WebRTC carries the voice directly between peers; the server
+only relays signalling, which keeps it cheap and the latency low.
+
+**Why the database does the proximity work.** A `$near` query against an indexed
+position answers "who is within earshot" in one call. Filtering every player in
+application code would not extend past a handful of people.
+
+---
+
+## 5. Workflow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Browser A
+  participant S as Server
+  participant M as MongoDB
+  participant B as Browser B
+
+  A->>S: connect (Socket.IO)
+  S->>M: store player + spawn position
+  S-->>A: world:state, room:state
+
+  A->>S: player:move { x, y }
+  S->>M: $near within the leave radius
+  M-->>S: players in earshot
+  S->>S: hysteresis filter, cap at 8 nearest
+  S-->>A: player:nearby
+  S-->>A: proximity:enter
+  S-->>B: proximity:enter
+
+  A->>S: webrtc:offer (relayed only if in range)
+  S-->>B: webrtc:offer
+  B-->>A: webrtc:answer via server
+  A<<->>B: audio, peer to peer
+
+  Note over A,B: every frame — distance gain, stereo pan, occlusion raycast
+```
+
+**Step by step**
+
+1. **Enter.** A socket connects; the server assigns a free spawn slot and stores the
+   player with a `location: [x, y]` field.
+2. **Move.** The client moves locally and broadcasts `player:move` (throttled to
+   ~40 ms). The server clamps, persists and broadcasts `player:moved`.
+3. **Find who is near.** The server runs `$near` within the listener's leave radius,
+   filters by hysteresis, keeps the eight nearest, and emits `player:nearby` plus
+   `proximity:enter` / `proximity:leave` to both sides.
+4. **Connect the audio.** The two browsers exchange offer, answer and ICE through
+   the server, which relays them only between players actually in range.
+5. **Mix it.** Each frame, one loop per peer updates gain from distance, pan from
+   direction, and a low-pass when furniture blocks the line between them.
+
+---
+
+## 6. Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Client | React + Vite | Component model for panels; Vite for a fast build |
+| World | HTML5 Canvas | Hundreds of shapes per frame without DOM overhead |
+| Audio | Web Audio API | Per-peer gain, panner and filter nodes in one graph |
+| Voice | WebRTC | Peer-to-peer media — the server never carries audio |
+| Transport | Socket.IO | Rooms, acknowledgements, automatic reconnection |
+| Data | MongoDB | `$near` on a `2d` index answers proximity in one query |
+| Scale | Redis (optional) | Adapter lets several instances share rooms and events |
+
+---
+
+## 7. Project structure
 
 ```
-        positions + signaling (Socket.IO, over WebSocket)
-   ┌──────────────────────────────────────────────────────────┐
-   │                                                          ▼
-┌──┴───────────────┐                                   ┌───────────────┐
-│   Browser A      │                                   │  Node.js      │
-│  React + Canvas  │                                   │  Express +    │
-│  WebRTC + WebAudio                                   │  Socket.IO    │
-└──┬───────────────┘                                   └───────┬───────┘
-   │                                                           │
-   │  WebRTC audio (peer-to-peer, only within 100px)           │  $near query
-   │                                                           │  + 2d index
-   │                                                           ▼
-┌──┴───────────────┐                                   ┌───────────────┐
-│   Browser B      │                                   │   MongoDB     │
-│  React + Canvas  │                                   │  players      │
-└──────────────────┘                                   │  location[x,y]│
-                                                       └───────────────┘
-```
-
-- **Positions and signaling** travel over Socket.IO through the server.
-- **Audio** flows directly browser-to-browser (WebRTC), never through the server.
-- The server's only job in the audio path is deciding **who is close enough** to
-  be connected, using a MongoDB `$near` query.
-
-## 4. Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React 19, Vite, HTML5 Canvas, WebRTC (`getUserMedia`, `RTCPeerConnection`), Socket.IO client |
-| Backend | Node.js, Express 5, Socket.IO 4 |
-| Database | MongoDB (geospatial `2d` index + `$near`) |
-| Realtime | Socket.IO (WebSocket) |
-| Audio (planned) | Web Audio API (gain + stereo panning) |
-
-## 5. Project Structure
-
-```
-ProxiSpeak/
-├── client/                     # React frontend
+.
+├── client/                 React application
 │   ├── src/
-│   │   ├── App.jsx             # Canvas world, movement, WebRTC client, nearby + audio UI
-│   │   ├── App.css             # Styling
-│   │   ├── main.jsx            # React entry point
-│   │   └── index.css
-│   ├── index.html
-│   └── vite.config.js
-│
-├── server/                     # Node.js backend
-│   ├── index.js                # Express + Socket.IO: movement, proximity, WebRTC signaling relay
-│   ├── db.js                   # MongoDB connection helper
-│   ├── proximity.js            # Pure-JS proximity oracle (reference implementation)
-│   ├── proximity.test.js       # Proximity unit tests
-│   └── audit.js                # Spatial audit — correctness + latency benchmark
-│
-├── WebRTC-Research.md          # WebRTC research notes
-├── MID-REVIEW.md               # Mid-review run-book + evidence checklist
-└── README.md
+│   │   ├── App.jsx         Shell, world render loop, panels
+│   │   ├── Landing.jsx     Marketing page
+│   │   ├── office.js       Built-in layout, accessors
+│   │   ├── occlusion.js    Segment/rect geometry for blocked audio
+│   │   ├── minimap.js      Minimap drawing and scale maths
+│   │   ├── cursor.js       Pointer → world mapping
+│   │   ├── useVoiceChat.js WebRTC + spatial mixer
+│   │   ├── useScreenShare.js
+│   │   ├── useRoomLayout.js
+│   │   ├── useAudioDevices.js
+│   │   ├── activity.js, typingIndicators.js, unreadMessages.js
+│   │   └── *.test.js       Unit tests
+│   └── tests/              Smoke harness (jsdom + esbuild)
+├── server/
+│   ├── index.js            Entry: HTTP, Socket.IO, startup
+│   ├── chat.js             Chat handlers
+│   ├── chatTyping.js       Typing indicators
+│   ├── roomHandler.js      Room join/leave
+│   ├── roomUtils.js        Room channels and emits
+│   ├── lib/                Pure, testable modules
+│   │   ├── session.js      Proximity diff, spawn, clamping
+│   │   ├── proximity.js    Radius and hysteresis maths
+│   │   ├── rooms.js        Room names, channels
+│   │   ├── layouts.js      Room layout store and validation
+│   │   ├── meeting-call.js Call membership and signalling rules
+│   │   ├── meeting-events.js Raise hand, reactions
+│   │   ├── screen-share.js Screen sharing
+│   │   ├── mesh.js         Optional Redis adapter
+│   │   ├── db.js           Pooled, guarded connection
+│   │   ├── activity.js     Presence notifications
+│   │   ├── chat.js         Chat message creation and routing
+│   │   └── rate-limit.js
+│   ├── tests/              Server test suites
+│   ├── audit.js            Spatial benchmark against MongoDB
+│   ├── spatial-benchmark.js Benchmark without a database
+│   └── Dockerfile
+└── docs/                   Review packs, roadmap, testing guide, images
 ```
 
-## 6. How It Works
+---
 
-1. **Connect.** A browser opens a Socket.IO connection; the server assigns it a
-   non-overlapping spawn slot and stores the player in MongoDB with a
-   `location: [x, y]` field.
-2. **Move.** The client moves the avatar locally (WASD / arrow keys, with
-   furniture collision) and broadcasts `player:move` (throttled ~40 ms). The
-   server clamps the position, persists it, and broadcasts `player:moved`.
-3. **Proximity.** On each move the server runs a MongoDB `$near` query with a
-   **100px** `$maxDistance` to find who is within earshot, and emits
-   `proximity:enter` / `proximity:leave` to **both** players as they come into or
-   leave range.
-4. **Signaling.** Clients exchange `webrtc:offer` / `webrtc:answer` / `webrtc:ice`
-   through the server, which **relays them only between players within
-   proximity**. The peer with the lower socket id initiates, avoiding glare.
-5. **Audio.** A `RTCPeerConnection` is established per nearby peer; remote audio
-   plays through its own audio element. *(Next: route it through the Web Audio
-   API for distance-based gain and panning.)*
+## 8. Data model
 
-## 7. Data Model
-
-The `players` collection (MongoDB):
+**`players`**
 
 | Field | Type | Notes |
 |---|---|---|
-| `socketId` | string | Socket.IO connection id (primary key) |
+| `socketId` | string | Socket.IO connection id |
 | `name` | string | Display name |
-| `x`, `y` | number | Avatar position in the 1000×600 world |
-| `location` | `[x, y]` | Geospatial point — indexed with a `2d` index (`min: 0, max: 1000`) |
-| `connected` | boolean | Whether the player is currently connected |
-| `createdAt` / `updatedAt` | Date | Timestamps |
+| `avatarColor` | string | Hex colour |
+| `room` | string | Room name — scopes proximity and chat |
+| `roomId` | string | Room id — scopes presence and channels |
+| `x`, `y` | number | Position in the 1000 × 600 world |
+| `location` | `[x, y]` | Geospatial point, `2d` index, `min: 0`, `max: 1000` |
+| `connected` | boolean | Current connection state |
 
-## 8. Realtime Events
+**`rooms`** — `_id`, `name`, `layout { zones, furniture, plants }`
+**`chatMessages`** — `_id`, `messageId`, `senderId`, `name`, `roomId`, `text`,
+`timestamp`, `clientMessageId` (unique per sender, so a retry cannot duplicate)
+
+---
+
+## 9. Realtime events
 
 **Client → Server**
 
 | Event | Payload |
 |---|---|
-| `room:join` | Room ID; callback returns success/error |
-| `player:setName` | `name` |
-| `player:setStatus` / `player:setAvatarColor` | Profile status / avatar colour |
+| `room:join` | Room id; callback returns success or error |
+| `player:setName` / `player:setStatus` / `player:setAvatarColor` | Profile |
+| `player:setRadius` | Listening radius in pixels, clamped 50–200 |
 | `player:move` | `{ x, y }` |
-| `chat:send` | Message text, unique client message ID, callback |
-| `chat:typing` | `{ isTyping }` — never includes message text |
+| `chat:send` | Text, client message id, optional scope, callback |
+| `chat:typing` | `{ isTyping }` — never carries message text |
+| `meeting:join` / `meeting:leave` | Call membership |
+| `meeting:hand` / `meeting:reaction` | `{ raised }` / `{ emoji }` |
+| `screen:start` / `screen:stop` / `screen:watch` / `screen:offer` / `screen:answer` / `screen:ice-candidate` / `screen:list` | Screen sharing |
 | `webrtc:offer` / `webrtc:answer` / `webrtc:ice` | Target peer and signal |
 
 **Server → Client**
 
 | Event | Payload |
 |---|---|
-| `players:count` | Global connected-player count |
-| `room:presence` | Room-scoped join/leave notification |
-| `chat:history` / `chat:message` | Persisted room history / room message |
+| `world:state` | Array of players |
+| `player:joined` / `player:moved` / `player:left` / `player:renamed` | Player or id |
+| `player:nearby` | Array of nearby players with distance |
+| `proximity:enter` / `proximity:leave` | Peer, or peer id |
+| `chat:message` / `chat:history` | Room or global message / persisted history |
 | `chat:typing` | Room-scoped typing status |
-| `world:state` | array of players |
-| `player:joined` / `player:moved` / `player:left` | player / id |
-| `player:renamed` | player |
-| `player:nearby` | array of nearby players |
-| `proximity:enter` / `proximity:leave` | peer / peer id |
+| `meeting:participant-joined` / `meeting:participant-left` | Participant |
+| `meeting:hand` / `meeting:reaction` | `{ id, name, raised }` / `{ id, name, emoji }` |
+| `activity` | Presence notification |
+| `players:count` | Global connected count |
 
-Room membership scopes player lists, proximity audio, chat history and
-notifications. Messages sent while another room is open update that room's
-unread badge; opening the room clears its count. Typing indicators are sent
-only to the active room and expire after two seconds of inactivity.
+---
 
-## 9. Getting Started
+## 10. Getting started
 
-**Prerequisites:** Node.js 20+, a MongoDB instance (local or Atlas).
-
-> **From the repo root**, pass-through scripts mirror the commands below:
-> `npm run install:all`, `npm run dev:server`, `npm run dev:client`, `npm test`,
-> `npm run audit`, `npm run audit:local`. The client and server are separate
-> packages, so a bare `npm run …` in the root will fail — use these, or `cd` into
-> the package first.
-
-### Backend
+**Requirements:** Node 20+, MongoDB (local or Atlas).
 
 ```bash
+# server
 cd server
+cp .env.example .env        # set MONGODB_URI
 npm install
-# create server/.env
-echo "MONGODB_URI=your_mongodb_connection_string" > .env
-npm run dev            # http://localhost:3000
-```
+npm run dev                 # http://localhost:3000
 
-### Frontend
-
-```bash
+# client (second terminal)
 cd client
+cp .env.example .env        # set VITE_SERVER_URL
 npm install
-npm run dev            # http://localhost:5173
+npm run dev                 # http://localhost:5173
 ```
 
-Open `http://localhost:5173` in **two** browser windows, click **Enable
-microphone** in each, and move the avatars within 100px to connect.
+Open **two windows**, set different names, and walk toward each other. The dev
+server binds to `0.0.0.0`, so you can also open it from another device on your
+network — which is the quickest way to test real WebRTC between two machines.
 
-> `getUserMedia` requires a **secure context** — `localhost` or HTTPS. Two tabs on
-> one machine is enough; two *different* machines need HTTPS (or a tunnel).
+**Scripts**
 
-### Scripts
+| Command | Does |
+|---|---|
+| `npm run dev` (server) | Start with nodemon |
+| `npm run dev` (client) | Vite dev server |
+| `npm test` (server) | 21 suites |
+| `npm test` (client) | Unit tests, smoke and occlusion |
+| `npm run audit` | Spatial benchmark against MongoDB |
+| `npm run audit:local` | Same benchmark, no database needed |
+| `npm run build` (client) | Static build to `client/dist` |
 
-| Directory | Command | Purpose |
-|---|---|---|
-| **root** | `npm run install:all` | Install both packages |
-| **root** | `npm run dev:server` / `dev:client` | Start backend / frontend |
-| **root** | `npm test` | Run all server test suites |
-| **root** | `npm run audit` / `audit:local` | Spatial audit (MongoDB / no MongoDB) |
-| `server` | `npm run dev` | Start backend with nodemon |
-| `server` | `npm start` | Start backend |
-| `server` | `npm test` | Run all server test suites |
-| `server` | `npm run audit` | Spatial audit against MongoDB |
-| `server` | `npm run audit:local` | Spatial benchmark — no MongoDB needed |
-| `client` | `npm run dev` | Start the Vite dev server |
-| `client` | `npm run build` | Production build |
+---
 
-## Final review
+## 11. Testing
 
-[docs/FINAL-REVIEW.md](docs/FINAL-REVIEW.md) states what was built, what was
-proven, what was not, and how to demonstrate it.
+| Layer | What it covers |
+|---|---|
+| **21 server suites** | Proximity, sessions, rooms, chat, routing, layouts, radius, mesh, screen share, meeting events, contracts, database guards |
+| **40 client unit tests** | Unread counts, typing, activity, minimap maths, cursor mapping |
+| **20 smoke checks** | Renders the real app in jsdom: the landing mounts, the canvas gets a context, the office opens, controls exist |
+| **14 occlusion checks** | Segment-versus-rectangle geometry, including corner touches and parallel lines |
 
-## Testing
+Decisions live in pure functions and are tested directly: proximity gating, chat
+routing, layout normalisation, radius clamping, meeting-event validation.
 
-Three layers — parse/build, unit suites, and client smoke tests that render the
-real app. `npm test` from the repo root runs the suites. See
-[docs/TESTING.md](docs/TESTING.md) for how to verify a feature and what each layer
-catches.
+Two layers exist because unit tests were not enough:
 
-## Scaling across instances
+- A **static contract test** compares what the server sends against what the client
+  reads, and asserts every event the client emits has a handler. That class of bug
+  shipped twice before the check existed.
+- A **smoke harness** renders the real component tree in jsdom, because two client
+  bugs passed every static check.
 
-The server runs as a single instance by default. Set `REDIS_URL` and it attaches
-Socket.IO's Redis adapter, so several instances share rooms and events — a player
-connected to one process can be heard by a player on another.
+See [`docs/TESTING.md`](docs/TESTING.md) for how to run and extend them.
 
-```bash
-REDIS_URL=redis://localhost:6379 npm run dev:server
-```
+---
 
-Each client only opens connections to its **eight nearest** peers in earshot
-(`MAX_MESH_PEERS` in `server/index.js`). A full mesh — everyone connected to
-everyone — does not scale past a few dozen people in one place, so the cap keeps
-bandwidth and CPU bounded as the room fills.
+## 12. Deployment
 
-The mesh is optional and fails soft: if `REDIS_URL` is unset, or Redis is
-unreachable, the server logs it and continues as a single instance.
+**The client and server deploy separately** — the server is a long-running Node
+process, the client is static files.
 
-## Deploying
+**Checklist**
 
-**Checklist before you deploy:**
-
-1. **HTTPS is mandatory.** `getUserMedia` only runs in a secure context, so the
-   client must be served over HTTPS (or `localhost`). On plain HTTP the
-   microphone button simply does nothing.
-2. **Set `CORS_ORIGIN`** to your frontend's origin(s), comma-separated. Left
-   unset it allows any origin.
-3. **Set `VITE_SERVER_URL`** at client build time to your public server URL.
-4. **Add a TURN server** via `VITE_TURN_URL` / `VITE_TURN_USERNAME` /
-   `VITE_TURN_CREDENTIAL`. STUN alone fails for peers behind symmetric NATs or
-   strict corporate firewalls, and it fails silently. This is the most common
-   reason a WebRTC app works in a demo and breaks in production.
-5. **Point `MONGODB_URI`** at your database (Atlas or self-hosted).
-
-Both packages ship a `.env.example` — copy it to `.env` and fill it in.
+1. **HTTPS is mandatory.** Browsers refuse microphone and screen capture outside a
+   secure context.
+2. **Set `CORS_ORIGIN`** to the deployed frontend origin, exactly.
+3. **Set `VITE_SERVER_URL` at build time** — Vite bakes it in, so setting it after
+   the build has no effect.
+4. **Add a TURN relay** via `VITE_TURN_URL`, `VITE_TURN_USERNAME`,
+   `VITE_TURN_CREDENTIAL`. STUN alone fails silently between networks.
+5. **Point `MONGODB_URI`** at Atlas or a self-hosted instance, and allow the host's
+   IP range.
 
 **Server** — a `Dockerfile` is included:
 
@@ -267,62 +380,49 @@ docker run -p 3000:3000 \
   proxispeak-server
 ```
 
-**Client** — `npm run build` in `client/` writes static files to `client/dist`;
-serve them from any static host (Netlify, Vercel, S3, nginx).
+**Deploying the server to Render**
 
-**Deploying the server to Render** — a concrete path through the checklist above:
+1. Connect the repository to Render.
+2. Runtime **Node**, **Root Directory** `server`.
+3. Build `npm ci`, start `npm start`.
+4. Add `MONGODB_URI`, and `CORS_ORIGIN` set to the frontend URL.
+5. Deploy and confirm `MongoDB connected successfully` in the logs.
 
-1. Connect the ProxiSpeak repository to Render.
-2. Choose **Node** as the runtime and set **Root Directory** to `server`.
-3. Build command `npm ci`, start command `npm start`.
-4. Add `MONGODB_URI` with your MongoDB Atlas connection string.
-5. Set `CORS_ORIGIN` to the deployed frontend URL.
-6. Deploy the web service and confirm `MongoDB connected successfully` in the logs.
+Set variables in the dashboard rather than committing a `.env`. Then point the
+frontend's `VITE_SERVER_URL` at the backend and rebuild.
 
-Set the variables in the dashboard rather than committing a `.env`. Then point the
-frontend's `VITE_SERVER_URL` at the deployed backend and **rebuild** — Vite bakes
-that value in at build time, so setting it afterwards has no effect.
+**Several instances** — set `REDIS_URL` and the adapter attaches automatically.
 
-**Not in place yet:** authentication (anyone can connect and set any name), camera
-video, and a multi-instance mesh that has been run against a real Redis — the
-adapter is built and tested, but never exercised on two live instances.
+---
 
-## 10. Progress
+## 13. Progress
 
-| Phase | Focus | Status |
+| Week | Delivered |
+|---|---|
+| **1** | Socket.IO signalling, keyboard movement, furniture collision, MongoDB geospatial schema |
+| **2** | `$near` proximity with hysteresis, WebRTC peer audio, microphone capture, mute |
+| **3** | Distance attenuation and stereo panning in one mixer loop; optional Redis mesh with an eight-peer cap |
+| **4** | Room layouts in MongoDB, sound occlusion, app shell, device pickers, minimap, adjustable radius |
+| **Beyond** | Click to walk, landing page, activity feed, global chat, raise hand and reactions, screen sharing, pooled database connection |
+
+---
+
+## 14. Team
+
+| Member | Role | Contribution |
 |---|---|---|
-| **Week 1** | Signaling & Movement — position broadcast, MongoDB geospatial schema, canvas world, keyboard movement | ✅ Done |
-| **Week 2** | Proximity Calculations (`$near`, 100px gating) + WebRTC Integration (`getUserMedia`, peer audio) | ✅ Done |
-| **Mid-Review** | Spatial Audit (sub-20ms proof) + Audio Check (two-browser demo) | ✅ Both complete — audit PASS (1 ms), audio verified live |
-| **Week 3** | Mesh Scaling (Redis Pub/Sub, multi-instance) + Dynamic Attenuation (Web Audio gain) | 🟢 Attenuation ✅ (spatial mixer); mesh built (Redis adapter + 8-peer cap) — needs a two-instance demo |
-| **Week 4** | Room Persistence (layouts + sound-blocking obstacles) + Polish (3D panning, 60 FPS) | 🟢 Layouts ✅ (MongoDB) + obstacles ✅ (occlusion); stereo pan ✅; 60 FPS unmeasured |
-| **Extras** | People list, chat with typing + unread counts, avatar colour, status, device pickers, screen sharing, app shell, room cards | ✅ Done |
+| **Revanth** | Backend & integration lead | Signalling server, proximity, spatial mixer, occlusion, room persistence, Redis mesh, client integration, testing and deployment |
+| **Vivek** | Frontend | Screen sharing, chat typing indicators, unread counts, global player count |
+| **Naseema** | Features | Rooms and chat, meeting call, activity notifications, raise hand and reactions, deployment guide |
+| **Janakirani** | Research | WebRTC research and testing report, connection and dev-server improvements |
 
-**Working today:** live multiplayer movement, MongoDB `$near` proximity grouping,
-proximity-gated WebRTC signaling, and peer-to-peer audio between nearby avatars.
+---
 
-**Not yet built:** the Web Audio spatial mixer (gain/panning), Redis-backed mesh
-scaling, room/furniture persistence, and sound occlusion.
+## 15. Project information
 
-## 11. Team & Roles
-
-| Member | Role | Owns |
-|---|---|---|
-| **Revanth** | Backend & Integration (Lead) | Signaling server, Redis mesh scaling, integration, deployment |
-| **Naseema** | Database Developer | Geospatial engine (`$near`, `$geoWithin`, schemas), room persistence |
-| **Vivek** | Frontend Developer | 2D virtual world (React + Canvas), rendering, polish |
-| **Janakirani Venkatesan** | WebRTC & Spatial Audio | Peer connections, Web Audio mixer, browser testing |
-
-## 12. Roadmap
-
-- **Week 3** — cap the WebRTC mesh to the nearest peers in earshot; add a Redis
-  Pub/Sub adapter so Socket.IO can scale across Node instances; hook peer audio
-  into the Web Audio API with distance-based gain.
-- **Week 4** — persist office layouts and furniture (sound-blocking obstacles) in
-  MongoDB; add stereo panning; hold a steady 60 FPS on the canvas.
-
-## 13. Project Information
-
-- **Project:** ProxiSpeak — Geospatial Proximity Audio Ecosystem
-- **Group:** 33
-- **Assignment Code:** ITS/WEB/1322
+| | |
+|---|---|
+| **Assignment** | ITS/WEB/1322 |
+| **Repository** | [revanthofficial21/ProxiSpeak](https://github.com/revanthofficial21/ProxiSpeak) |
+| **Branches** | `main` (integration), `revanth` (development) |
+| **Documentation** | [Final review](docs/FINAL-REVIEW.md) · [Testing](docs/TESTING.md) · [Roadmap](docs/ROADMAP.md) · [WebRTC research](docs/WebRTC-Research.md) |

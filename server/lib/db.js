@@ -1,33 +1,84 @@
-
+// One MongoDB connection for the process.
+//
+// The pool is sized here rather than left at the driver's defaults, connecting is
+// guarded so two concurrent callers cannot open two clients, and a failed attempt
+// closes its own socket instead of leaking one.
 const { MongoClient } = require("mongodb");
 
-let client;
-let db;
+const DB_NAME = "proxispeak";
 
-async function connectDB() {
-  const uri = process.env.MONGODB_URI;
+const CONNECTION_OPTIONS = {
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 10000,
+  // A pooled connection handles a room of clients without opening a socket each.
+  maxPoolSize: 50,
+  minPoolSize: 0,
+};
+
+let client = null;
+let database = null;
+let connecting = null;
+
+async function connectDB(uri = process.env.MONGODB_URI) {
+  if (database) return database;
+  // A second caller while the first is still connecting waits for the same attempt
+  // rather than opening a competing client.
+  if (connecting) return connecting;
 
   if (!uri) {
     throw new Error("MONGODB_URI is missing from server/.env");
   }
 
-  client = new MongoClient(uri);
-  await client.connect();
+  connecting = (async () => {
+    const nextClient = new MongoClient(uri, CONNECTION_OPTIONS);
 
-  db = client.db("proxispeak");
+    try {
+      await nextClient.connect();
+      const nextDatabase = nextClient.db(DB_NAME);
 
-  await db.command({ ping: 1 });
-  console.log("MongoDB connected successfully");
+      // connect() can resolve before the server is actually usable, so prove it.
+      await nextDatabase.command({ ping: 1 });
 
-  return db;
+      client = nextClient;
+      database = nextDatabase;
+      console.log("MongoDB connected successfully");
+      return database;
+    } catch (error) {
+      await nextClient.close().catch(() => {});
+      throw error;
+    } finally {
+      connecting = null;
+    }
+  })();
+
+  return connecting;
 }
 
 function getDB() {
-  if (!db) {
+  if (!database) {
     throw new Error("MongoDB is not connected yet");
   }
 
-  return db;
+  return database;
 }
 
-module.exports = { connectDB, getDB };
+async function closeDB() {
+  // Let an in-flight attempt settle first, or its client is never closed.
+  if (connecting) await connecting.catch(() => {});
+  if (!client) return;
+
+  const closing = client;
+  client = null;
+  database = null;
+
+  await closing.close();
+  console.log("MongoDB connection closed.");
+}
+
+module.exports = {
+  connectDB,
+  getDB,
+  closeDB,
+  DB_NAME,
+  CONNECTION_OPTIONS,
+};

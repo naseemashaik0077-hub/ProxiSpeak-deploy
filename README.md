@@ -270,8 +270,22 @@ docker run -p 3000:3000 \
 **Client** — `npm run build` in `client/` writes static files to `client/dist`;
 serve them from any static host (Netlify, Vercel, S3, nginx).
 
-**Not in place yet:** authentication (anyone can connect and set any name),
-Redis-backed multi-instance scaling, and video.
+**Deploying the server to Render** — a concrete path through the checklist above:
+
+1. Connect the ProxiSpeak repository to Render.
+2. Choose **Node** as the runtime and set **Root Directory** to `server`.
+3. Build command `npm ci`, start command `npm start`.
+4. Add `MONGODB_URI` with your MongoDB Atlas connection string.
+5. Set `CORS_ORIGIN` to the deployed frontend URL.
+6. Deploy the web service and confirm `MongoDB connected successfully` in the logs.
+
+Set the variables in the dashboard rather than committing a `.env`. Then point the
+frontend's `VITE_SERVER_URL` at the deployed backend and **rebuild** — Vite bakes
+that value in at build time, so setting it afterwards has no effect.
+
+**Not in place yet:** authentication (anyone can connect and set any name), camera
+video, and a multi-instance mesh that has been run against a real Redis — the
+adapter is built and tested, but never exercised on two live instances.
 
 ## 10. Progress
 

@@ -5,7 +5,7 @@ const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 require("dotenv").config();
-const { MongoClient } = require("mongodb");
+const { connectDB, closeDB } = require("./lib/db");
 const {
   markPlayerConnected,
   markPlayerDisconnected,
@@ -69,10 +69,6 @@ const {
 
 const app = express();
 const httpServer = http.createServer(app);
-
-const mongoClient = new MongoClient(process.env.MONGODB_URI, {
-  serverSelectionTimeoutMS: 10000,
-});
 
 let db;
 let mesh = null;
@@ -913,8 +909,7 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
-    await mongoClient.connect();
-    db = mongoClient.db("proxispeak");
+    db = await connectDB();
 
     const collection = db.collection("players");
 
@@ -1006,7 +1001,7 @@ async function shutdown(signal) {
     io.close();
     httpServer.close();
     await detachMesh(mesh);
-    await mongoClient.close();
+    await closeDB();
   } catch (error) {
     console.error("Error during shutdown:", error.message);
   }

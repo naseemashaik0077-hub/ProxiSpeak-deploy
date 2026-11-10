@@ -507,4 +507,4 @@ Each was reworked against the current architecture and covered by tests.
 | **Assignment** | ITS/WEB/1322 |
 | **Repository** | [revanthofficial21/ProxiSpeak](https://github.com/revanthofficial21/ProxiSpeak) |
 | **Branches** | `main` (integration), `revanth` (development) |
-| **Documentation** | [Final review](docs/FINAL-REVIEW.md) · [Testing](docs/TESTING.md) · [Roadmap](docs/ROADMAP.md) · [WebRTC research](docs/WebRTC-Research.md) |
+| **Documentation** | [Final review](docs/FINAL-REVIEW.md) · [Testing](docs/TESTING.md) · [WebRTC research](docs/WebRTC-Research.md) |
